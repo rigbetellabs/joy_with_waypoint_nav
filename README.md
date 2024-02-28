@@ -8,3 +8,5 @@ Joy teleop package with waypoint based autonomous navigation using joy buttons
      <param name="scale_angular" value="0.4" type="double"/>
      <node pkg="auto_joy_teleop" type="auto_joy_teleop" name="auto_joy_teleop"/>
 ```
+
+![autojoy](autojoyteleop.png)
