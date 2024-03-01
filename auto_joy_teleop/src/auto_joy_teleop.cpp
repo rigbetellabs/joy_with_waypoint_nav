@@ -6,6 +6,11 @@
 #include <nav_msgs/Odometry.h>
 #include <actionlib_msgs/GoalID.h>
 #include <std_msgs/Int32.h>
+#include <sensor_msgs/JoyFeedbackArray.h>
+#include <sensor_msgs/JoyFeedback.h>
+#include <std_srvs/Empty.h>
+#include <unistd.h>
+
 class TeleopHoverboard
 {
 public:
@@ -14,6 +19,11 @@ public:
 private:
   void joyCallback(const sensor_msgs::Joy::ConstPtr &joy);
   void odomCallback(const nav_msgs::Odometry::ConstPtr &odom);
+  sensor_msgs::JoyFeedback createFeedback(double intensity);
+  void publishTwist(const sensor_msgs::Joy::ConstPtr &joy);
+  void stopTwist();
+  void publishHapticFeedback(const sensor_msgs::JoyFeedback &feedback, int duration_ms, int iterations);
+  void stopHapticFeedback();
 
   ros::NodeHandle nh_;
 
@@ -21,22 +31,25 @@ private:
   double l_scale_, a_scale_;
   bool button7_pressed_last_time = false;
   bool button6_pressed_last_time = false;
+  bool button4_pressed_last_time = false;
+  bool button5_pressed_last_time = false;
   int pid_control_value = 1;
   nav_msgs::Odometry odom_received;
   geometry_msgs::PoseStamped home_pose_, pose_x_, pose_y_;
 
   ros::Publisher vel_pub_;
-  ros::Subscriber joy_sub_;
   ros::Publisher pose_pub_;
-  ros::Subscriber odom_sub_;
   ros::Publisher goal_cancel_pub_;
+  ros::Publisher joy_feedback_pub_;
   ros::Publisher pid_control_pub_;
+
+  ros::Subscriber joy_sub_;
+  ros::Subscriber odom_sub_;
 };
 
 TeleopHoverboard::TeleopHoverboard() : linear_(1),
                                        angular_(0)
 {
-
   nh_.param("axis_linear", linear_, 1);
   nh_.param("axis_angular", angular_, 0);
   nh_.param("scale_angular", a_scale_, 0.6);
@@ -49,7 +62,6 @@ TeleopHoverboard::TeleopHoverboard() : linear_(1),
   home_pose_.pose.position.x = 0.0;
   home_pose_.pose.position.y = 0.0;
   home_pose_.pose.position.z = 0.0;
-
   home_pose_.pose.orientation.w = 1.0;
   home_pose_.pose.orientation.x = 0.0;
   home_pose_.pose.orientation.y = 0.0;
@@ -58,6 +70,7 @@ TeleopHoverboard::TeleopHoverboard() : linear_(1),
   vel_pub_ = nh_.advertise<geometry_msgs::Twist>("/cmd_vel", 10, true);
   pose_pub_ = nh_.advertise<geometry_msgs::PoseStamped>("move_base_simple/goal", 1);
   goal_cancel_pub_ = nh_.advertise<actionlib_msgs::GoalID>("move_base/cancel", 1);
+  joy_feedback_pub_ = nh_.advertise<sensor_msgs::JoyFeedbackArray>("/joy/set_feedback", 10);
   pid_control_pub_ = nh_.advertise<std_msgs::Int32>("pid/control", 1);
 
   joy_sub_ = nh_.subscribe<sensor_msgs::Joy>("joy", 10, &TeleopHoverboard::joyCallback, this);
@@ -67,6 +80,58 @@ TeleopHoverboard::TeleopHoverboard() : linear_(1),
 void TeleopHoverboard::odomCallback(const nav_msgs::Odometry::ConstPtr &odom)
 {
   odom_received = *odom;
+}
+
+sensor_msgs::JoyFeedback TeleopHoverboard::createFeedback(double intensity)
+{
+  sensor_msgs::JoyFeedback feedback;
+  feedback.type = 1;
+  feedback.id = 0;
+  feedback.intensity = intensity;
+  return feedback;
+}
+
+void TeleopHoverboard::publishTwist(const sensor_msgs::Joy::ConstPtr &joy)
+{
+  geometry_msgs::Twist twist;
+  twist.angular.z = a_scale_ * joy->axes[angular_];
+  twist.linear.x = l_scale_ * joy->axes[linear_];
+  twist.linear.y = l_scale_ * joy->axes[3];
+  vel_pub_.publish(twist);
+}
+
+void TeleopHoverboard::stopTwist()
+{
+  geometry_msgs::Twist twist;
+  twist.angular.z = 0.0;
+  twist.linear.x = 0.0;
+  twist.linear.y = 0.0;
+  vel_pub_.publish(twist);
+}
+
+void TeleopHoverboard::publishHapticFeedback(const sensor_msgs::JoyFeedback &feedback, int duration_ms, int iterations)
+{
+  for (int i = 0; i < iterations; i++)
+  {
+    sensor_msgs::JoyFeedbackArray feedback_array;
+    feedback_array.array.push_back(feedback);
+    joy_feedback_pub_.publish(feedback_array);
+    usleep(duration_ms * 1000); // Sleep for specified duration in ms
+    stopHapticFeedback();
+    usleep(duration_ms * 1000);
+  }
+}
+
+void TeleopHoverboard::stopHapticFeedback()
+{
+  sensor_msgs::JoyFeedback stop_feedback;
+  stop_feedback.type = 1;
+  stop_feedback.id = 0;          // Assuming the same ID used for starting feedback
+  stop_feedback.intensity = 0.0; // Stop haptic feedback
+
+  sensor_msgs::JoyFeedbackArray feedback_array;
+  feedback_array.array.push_back(stop_feedback);
+  joy_feedback_pub_.publish(feedback_array);
 }
 
 void TeleopHoverboard::joyCallback(const sensor_msgs::Joy::ConstPtr &joy)
@@ -92,19 +157,46 @@ void TeleopHoverboard::joyCallback(const sensor_msgs::Joy::ConstPtr &joy)
     ROS_INFO_STREAM("Angular Scale Set to : " << a_scale_);
   }
 
+  if (joy->buttons[4] == 1 && !button4_pressed_last_time)
+  {
+    // Store pose_x_
+    pose_x_.pose = odom_received.pose.pose;
+    button4_pressed_last_time=true;
+    publishHapticFeedback(createFeedback(1.0), 200, 1);
+    ROS_INFO_STREAM("X pose store");
+  }
+  else if (joy->buttons[4] == 0 && button4_pressed_last_time)
+  {
+    // Reset the flag when button 7 is released
+    button4_pressed_last_time = false;
+  }
+  if (joy->buttons[5] == 1 && !button5_pressed_last_time)
+  {
+    // Store pose_y_
+    pose_y_.pose = odom_received.pose.pose;
+    button5_pressed_last_time=true;
+    publishHapticFeedback(createFeedback(1.0), 200, 1);
+    ROS_INFO_STREAM("Y pose store");
+  }
+  else if (joy->buttons[5] == 0 && button5_pressed_last_time)
+  {
+    // Reset the flag when button 7 is released
+    button5_pressed_last_time = false;
+  }
   if (joy->buttons[0] == 1)
   {
     pose_pub_.publish(home_pose_);
-    ROS_INFO_STREAM("publishing home position");
+    ROS_INFO_STREAM("Publishing home position");
   }
 
-  if (joy->buttons[4] == 1)
+  if (joy->buttons[1] == 1)
   {
-    pose_x_.pose = odom_received.pose.pose;
-  }
-  if (joy->buttons[5] == 1)
-  {
-    pose_y_.pose = odom_received.pose.pose;
+    // Cancel the goal
+    actionlib_msgs::GoalID cancel_goal_;
+    goal_cancel_pub_.publish(cancel_goal_);
+    ROS_INFO_STREAM("Cancel Goal");
+
+    publishHapticFeedback(createFeedback(1.0), 150, 3);
   }
 
   if (joy->buttons[2] == 1)
@@ -115,12 +207,6 @@ void TeleopHoverboard::joyCallback(const sensor_msgs::Joy::ConstPtr &joy)
   {
     pose_pub_.publish(pose_y_);
   }
-  if (joy->buttons[1] == 1)
-  {
-    actionlib_msgs::GoalID cancel_goal_;
-    goal_cancel_pub_.publish(cancel_goal_);
-  }
-
   if (joy->buttons[7] == 1 && !button7_pressed_last_time)
   {
     // Increment PID control value only when button 7 is pressed for the first time
@@ -154,25 +240,30 @@ void TeleopHoverboard::joyCallback(const sensor_msgs::Joy::ConstPtr &joy)
     // Reset the flag when button 7 is released
     button6_pressed_last_time = false;
   }
+  if (joy->buttons[8] == 1)
+  {
+    // Call the service to clear the costmap
+    ros::ServiceClient clear_costmap_client = nh_.serviceClient<std_srvs::Empty>("/move_base/clear_costmaps");
+    std_srvs::Empty empty_msg;
+    if (clear_costmap_client.call(empty_msg))
+    {
+      ROS_INFO("Costmap cleared");
+      publishHapticFeedback(createFeedback(1.0), 300, 1);
+    }
+    else
+    {
+      ROS_ERROR("Failed to call clear_costmap service");
+    }
+  }
   if (joy->axes[2] < 0.0)
   {
-    geometry_msgs::Twist twist;
-    twist.angular.z = a_scale_ * joy->axes[angular_];
-    twist.linear.x = l_scale_ * joy->axes[linear_];
-    twist.linear.y = l_scale_ * joy->axes[3];
-    vel_pub_.publish(twist);
-    // ROS_INFO_STREAM("Twist Sent : \n"
-    //                 << twist);
+    // Move based on joystick input
+    publishTwist(joy);
   }
   else
   {
-    geometry_msgs::Twist twist;
-    twist.angular.z = 0.0;
-    twist.linear.x = 0.0;
-    twist.linear.y = 0.0;
-    vel_pub_.publish(twist);
-    // ROS_INFO_STREAM("Twist Sent : \n"
-    //                 << twist);
+    // Stop movement
+    stopTwist();
   }
 }
 
