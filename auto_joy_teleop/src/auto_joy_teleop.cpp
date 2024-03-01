@@ -42,7 +42,7 @@ private:
   ros::Publisher goal_cancel_pub_;
   ros::Publisher joy_feedback_pub_;
   ros::Publisher pid_control_pub_;
-
+  ros::Publisher goal_status_pub_;
   ros::Subscriber joy_sub_;
   ros::Subscriber odom_sub_;
 };
@@ -72,6 +72,7 @@ TeleopHoverboard::TeleopHoverboard() : linear_(1),
   goal_cancel_pub_ = nh_.advertise<actionlib_msgs::GoalID>("move_base/cancel", 1);
   joy_feedback_pub_ = nh_.advertise<sensor_msgs::JoyFeedbackArray>("/joy/set_feedback", 10);
   pid_control_pub_ = nh_.advertise<std_msgs::Int32>("pid/control", 1);
+  goal_status_pub_ = nh_.advertise<std_msgs::Int32>("robot/goalstatus", 1);
 
   joy_sub_ = nh_.subscribe<sensor_msgs::Joy>("joy", 10, &TeleopHoverboard::joyCallback, this);
   odom_sub_ = nh_.subscribe<nav_msgs::Odometry>("odom", 10, &TeleopHoverboard::odomCallback, this);
@@ -116,9 +117,9 @@ void TeleopHoverboard::publishHapticFeedback(const sensor_msgs::JoyFeedback &fee
     sensor_msgs::JoyFeedbackArray feedback_array;
     feedback_array.array.push_back(feedback);
     joy_feedback_pub_.publish(feedback_array);
-    usleep(duration_ms * 1000); // Sleep for specified duration in ms
+    ros::Duration(duration_ms / 1000.0).sleep(); // Sleep for specified duration in ms
     stopHapticFeedback();
-    usleep(duration_ms * 1000);
+    ros::Duration(duration_ms / 1000.0).sleep();
   }
 }
 
@@ -161,9 +162,12 @@ void TeleopHoverboard::joyCallback(const sensor_msgs::Joy::ConstPtr &joy)
   {
     // Store pose_x_
     pose_x_.pose = odom_received.pose.pose;
-    button4_pressed_last_time=true;
+    button4_pressed_last_time = true;
     publishHapticFeedback(createFeedback(1.0), 200, 1);
     ROS_INFO_STREAM("X pose store");
+    std_msgs::Int32 goal_status_code;
+    goal_status_code.data = 5;
+    goal_status_pub_.publish(goal_status_code);
   }
   else if (joy->buttons[4] == 0 && button4_pressed_last_time)
   {
@@ -174,9 +178,12 @@ void TeleopHoverboard::joyCallback(const sensor_msgs::Joy::ConstPtr &joy)
   {
     // Store pose_y_
     pose_y_.pose = odom_received.pose.pose;
-    button5_pressed_last_time=true;
+    button5_pressed_last_time = true;
     publishHapticFeedback(createFeedback(1.0), 200, 1);
     ROS_INFO_STREAM("Y pose store");
+    std_msgs::Int32 goal_status_code;
+    goal_status_code.data = 5;
+    goal_status_pub_.publish(goal_status_code);
   }
   else if (joy->buttons[5] == 0 && button5_pressed_last_time)
   {
@@ -249,6 +256,9 @@ void TeleopHoverboard::joyCallback(const sensor_msgs::Joy::ConstPtr &joy)
     {
       ROS_INFO("Costmap cleared");
       publishHapticFeedback(createFeedback(1.0), 300, 1);
+      std_msgs::Int32 goal_status_code;
+      goal_status_code.data = 4;
+      goal_status_pub_.publish(goal_status_code);
     }
     else
     {
