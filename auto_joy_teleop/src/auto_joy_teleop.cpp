@@ -36,6 +36,9 @@ private:
   bool button4_pressed_last_time = false;
   bool button5_pressed_last_time = false;
   int pid_control_value = 1;
+  bool goal_reached_ = false;
+  bool x_pose_stored_ = false;
+  bool y_pose_stored_ = false;
   nav_msgs::Odometry odom_received;
   geometry_msgs::PoseStamped home_pose_, pose_x_, pose_y_;
 
@@ -119,10 +122,19 @@ void TeleopHoverboard::goalStatusCallback(const actionlib_msgs::GoalStatusArray:
   if (!status->status_list.empty())
   {
     int goal_status = status->status_list[0].status;
-    if (goal_status == actionlib_msgs::GoalStatus::SUCCEEDED)
+    if (goal_status == actionlib_msgs::GoalStatus::SUCCEEDED && !goal_reached_)
     {
-      // Trigger haptic feedback when the goal is reached
+      // Trigger haptic feedback when the goal is reached for the first time
       publishHapticFeedback(createFeedback(1.0), 200, 1);
+
+      // Set the flag to true to prevent continuous triggering
+      goal_reached_ = true;
+      ROS_INFO_STREAM("Goal Reached Vibration achieved");
+    }
+    else if (goal_status != actionlib_msgs::GoalStatus::SUCCEEDED)
+    {
+      // Reset the flag if the goal status is not "SUCCEEDED"
+      goal_reached_ = false;
     }
   }
 }
@@ -173,12 +185,12 @@ void TeleopHoverboard::joyCallback(const sensor_msgs::Joy::ConstPtr &joy)
     a_scale_ = std::max(0.0, a_scale_ + 0.1);
     ROS_INFO_STREAM("Angular Scale Set to : " << a_scale_);
   }
-
-  if (joy->buttons[4] == 1 && !button4_pressed_last_time)
+  if (joy->buttons[4] == 1 && !button4_pressed_last_time && !x_pose_stored_)
   {
     // Store pose_x_
     pose_x_.pose = odom_received.pose.pose;
     button4_pressed_last_time = true;
+    x_pose_stored_ = true;  // Set the flag
     publishHapticFeedback(createFeedback(1.0), 200, 1);
     ROS_INFO_STREAM("X pose store");
     std_msgs::Int32 goal_status_code;
@@ -189,12 +201,15 @@ void TeleopHoverboard::joyCallback(const sensor_msgs::Joy::ConstPtr &joy)
   {
     // Reset the flag when button 7 is released
     button4_pressed_last_time = false;
+    x_pose_stored_ = false;  // Reset the flag
   }
-  if (joy->buttons[5] == 1 && !button5_pressed_last_time)
+
+  if (joy->buttons[5] == 1 && !button5_pressed_last_time && !y_pose_stored_)
   {
     // Store pose_y_
     pose_y_.pose = odom_received.pose.pose;
     button5_pressed_last_time = true;
+    y_pose_stored_ = true;  // Set the flag
     publishHapticFeedback(createFeedback(1.0), 200, 1);
     ROS_INFO_STREAM("Y pose store");
     std_msgs::Int32 goal_status_code;
@@ -205,7 +220,9 @@ void TeleopHoverboard::joyCallback(const sensor_msgs::Joy::ConstPtr &joy)
   {
     // Reset the flag when button 7 is released
     button5_pressed_last_time = false;
+    y_pose_stored_ = false;  // Reset the flag
   }
+
   if (joy->buttons[0] == 1)
   {
     pose_pub_.publish(home_pose_);
