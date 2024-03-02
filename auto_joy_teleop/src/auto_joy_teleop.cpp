@@ -5,6 +5,7 @@
 #include <ros/console.h>
 #include <nav_msgs/Odometry.h>
 #include <actionlib_msgs/GoalID.h>
+#include <actionlib_msgs/GoalStatusArray.h>
 #include <std_msgs/Int32.h>
 #include <sensor_msgs/JoyFeedbackArray.h>
 #include <sensor_msgs/JoyFeedback.h>
@@ -24,6 +25,7 @@ private:
   void stopTwist();
   void publishHapticFeedback(const sensor_msgs::JoyFeedback &feedback, int duration_ms, int iterations);
   void stopHapticFeedback();
+  void goalStatusCallback(const actionlib_msgs::GoalStatusArray::ConstPtr &status);
 
   ros::NodeHandle nh_;
 
@@ -45,6 +47,7 @@ private:
   ros::Publisher goal_status_pub_;
   ros::Subscriber joy_sub_;
   ros::Subscriber odom_sub_;
+  ros::Subscriber goal_status_sub_;
 };
 
 TeleopHoverboard::TeleopHoverboard() : linear_(1),
@@ -76,6 +79,7 @@ TeleopHoverboard::TeleopHoverboard() : linear_(1),
 
   joy_sub_ = nh_.subscribe<sensor_msgs::Joy>("joy", 10, &TeleopHoverboard::joyCallback, this);
   odom_sub_ = nh_.subscribe<nav_msgs::Odometry>("odom", 10, &TeleopHoverboard::odomCallback, this);
+  goal_status_sub_ = nh_.subscribe<actionlib_msgs::GoalStatusArray>("move_base/status", 10, &TeleopHoverboard::goalStatusCallback, this);
 }
 
 void TeleopHoverboard::odomCallback(const nav_msgs::Odometry::ConstPtr &odom)
@@ -109,7 +113,19 @@ void TeleopHoverboard::stopTwist()
   twist.linear.y = 0.0;
   vel_pub_.publish(twist);
 }
-
+void TeleopHoverboard::goalStatusCallback(const actionlib_msgs::GoalStatusArray::ConstPtr &status)
+{
+  // Assuming that you are interested in the first goal status in the array
+  if (!status->status_list.empty())
+  {
+    int goal_status = status->status_list[0].status;
+    if (goal_status == actionlib_msgs::GoalStatus::SUCCEEDED)
+    {
+      // Trigger haptic feedback when the goal is reached
+      publishHapticFeedback(createFeedback(1.0), 200, 1);
+    }
+  }
+}
 void TeleopHoverboard::publishHapticFeedback(const sensor_msgs::JoyFeedback &feedback, int duration_ms, int iterations)
 {
   for (int i = 0; i < iterations; i++)
