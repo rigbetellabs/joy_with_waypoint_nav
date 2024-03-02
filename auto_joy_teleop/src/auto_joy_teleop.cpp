@@ -72,7 +72,7 @@ TeleopHoverboard::TeleopHoverboard() : linear_(1),
   goal_cancel_pub_ = nh_.advertise<actionlib_msgs::GoalID>("move_base/cancel", 1);
   joy_feedback_pub_ = nh_.advertise<sensor_msgs::JoyFeedbackArray>("/joy/set_feedback", 10);
   pid_control_pub_ = nh_.advertise<std_msgs::Int32>("pid/control", 1);
-  goal_status_pub_ = nh_.advertise<std_msgs::Int32>("robot/goalstatus", 1);
+  goal_status_pub_ = nh_.advertise<std_msgs::Int32>("robot/status", 1);
 
   joy_sub_ = nh_.subscribe<sensor_msgs::Joy>("joy", 10, &TeleopHoverboard::joyCallback, this);
   odom_sub_ = nh_.subscribe<nav_msgs::Odometry>("odom", 10, &TeleopHoverboard::odomCallback, this);
@@ -119,7 +119,7 @@ void TeleopHoverboard::publishHapticFeedback(const sensor_msgs::JoyFeedback &fee
     joy_feedback_pub_.publish(feedback_array);
     ros::Duration(duration_ms / 1000.0).sleep(); // Sleep for specified duration in ms
     stopHapticFeedback();
-    ros::Duration(duration_ms / 1000.0).sleep();
+    ros::Duration(duration_ms / 2000.0).sleep();
   }
 }
 
@@ -203,7 +203,7 @@ void TeleopHoverboard::joyCallback(const sensor_msgs::Joy::ConstPtr &joy)
     goal_cancel_pub_.publish(cancel_goal_);
     ROS_INFO_STREAM("Cancel Goal");
 
-    publishHapticFeedback(createFeedback(1.0), 150, 3);
+    publishHapticFeedback(createFeedback(1.0), 200, 3);
   }
 
   if (joy->buttons[2] == 1)
