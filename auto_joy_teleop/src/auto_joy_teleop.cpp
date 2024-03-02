@@ -124,20 +124,21 @@ void TeleopHoverboard::goalStatusCallback(const actionlib_msgs::GoalStatusArray:
     int goal_status = status->status_list[0].status;
     if (goal_status == actionlib_msgs::GoalStatus::SUCCEEDED && !goal_reached_)
     {
-      // Trigger haptic feedback when the goal is reached for the first time
+      // Trigger haptic feedback when the goal is reached
       publishHapticFeedback(createFeedback(1.0), 200, 1);
-
-      // Set the flag to true to prevent continuous triggering
-      goal_reached_ = true;
       ROS_INFO_STREAM("Goal Reached Vibration achieved");
+
+      // Reset the flag to allow vibration for the next goal
+      goal_reached_ = false;
     }
     else if (goal_status != actionlib_msgs::GoalStatus::SUCCEEDED)
     {
       // Reset the flag if the goal status is not "SUCCEEDED"
-      goal_reached_ = false;
+      goal_reached_ = true;
     }
   }
 }
+
 void TeleopHoverboard::publishHapticFeedback(const sensor_msgs::JoyFeedback &feedback, int duration_ms, int iterations)
 {
   for (int i = 0; i < iterations; i++)
