@@ -36,7 +36,6 @@ private:
   bool button4_pressed_last_time = false;
   bool button5_pressed_last_time = false;
   int pid_control_value = 1;
-  bool goal_reached_ = false;
   bool x_pose_stored_ = false;
   bool y_pose_stored_ = false;
   nav_msgs::Odometry odom_received;
@@ -50,7 +49,6 @@ private:
   ros::Publisher goal_status_pub_;
   ros::Subscriber joy_sub_;
   ros::Subscriber odom_sub_;
-  ros::Subscriber goal_status_sub_;
 };
 
 TeleopHoverboard::TeleopHoverboard() : linear_(1),
@@ -82,7 +80,6 @@ TeleopHoverboard::TeleopHoverboard() : linear_(1),
 
   joy_sub_ = nh_.subscribe<sensor_msgs::Joy>("joy", 10, &TeleopHoverboard::joyCallback, this);
   odom_sub_ = nh_.subscribe<nav_msgs::Odometry>("odom", 10, &TeleopHoverboard::odomCallback, this);
-  goal_status_sub_ = nh_.subscribe<actionlib_msgs::GoalStatusArray>("move_base/status", 10, &TeleopHoverboard::goalStatusCallback, this);
 }
 
 void TeleopHoverboard::odomCallback(const nav_msgs::Odometry::ConstPtr &odom)
@@ -115,28 +112,6 @@ void TeleopHoverboard::stopTwist()
   twist.linear.x = 0.0;
   twist.linear.y = 0.0;
   vel_pub_.publish(twist);
-}
-void TeleopHoverboard::goalStatusCallback(const actionlib_msgs::GoalStatusArray::ConstPtr &status)
-{
-  // Assuming that you are interested in the first goal status in the array
-  if (!status->status_list.empty())
-  {
-    int goal_status = status->status_list[0].status;
-    if (goal_status == actionlib_msgs::GoalStatus::SUCCEEDED && !goal_reached_)
-    {
-      // Trigger haptic feedback when the goal is reached
-      publishHapticFeedback(createFeedback(1.0), 200, 1);
-      ROS_INFO_STREAM("Goal Reached Vibration achieved");
-
-      // Reset the flag to allow vibration for the next goal
-      goal_reached_ = false;
-    }
-    else if (goal_status != actionlib_msgs::GoalStatus::SUCCEEDED)
-    {
-      // Reset the flag if the goal status is not "SUCCEEDED"
-      goal_reached_ = true;
-    }
-  }
 }
 
 void TeleopHoverboard::publishHapticFeedback(const sensor_msgs::JoyFeedback &feedback, int duration_ms, int iterations)
