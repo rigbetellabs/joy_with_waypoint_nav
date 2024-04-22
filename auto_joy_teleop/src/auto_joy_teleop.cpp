@@ -12,6 +12,7 @@
 #include "rclcpp/time_source.hpp"
 #include "action_msgs/srv/cancel_goal.hpp"
 #include "nav2_msgs/srv/clear_entire_costmap.hpp"
+#include "std_msgs/msg/int32.hpp"
 
 #include "tf2/exceptions.h"
 #include "tf2_ros/transform_listener.h"
@@ -36,6 +37,7 @@ public:
         joy_sub_ = this->create_subscription<sensor_msgs::msg::Joy>("joy", 10, std::bind(&AutoJoyTeleop::joy_callback, this, placeholders::_1));
         cmd_vel_pub_ = this->create_publisher<geometry_msgs::msg::Twist>("cmd_vel", 10);
         goal_pub_ = this->create_publisher<geometry_msgs::msg::PoseStamped>("goal_pose", 10);
+        pid_pub_ = this->create_publisher<std_msgs::msg::Int32>("pid/control", 10);
         cancel_goal_client_ = this->create_client<action_msgs::srv::CancelGoal>("/navigate_to_pose/_action/cancel_goal");
         clear_costmap_client_ = this->create_client<nav2_msgs::srv::ClearEntireCostmap>("/local_costmap/clear_entirely_local_costmap");
         timer_ = this->create_wall_timer(20ms, std::bind(&AutoJoyTeleop::master_callback, this));
@@ -217,7 +219,7 @@ private:
 
             if (!clear_costmap_client_->service_is_ready())
             {
-                RCLCPP_WARM_THROTTLE(this->get_logger(), *this->get_clock(), log_interval_, "Clear Costmap Service not available");
+                RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), log_interval_, "Clear Costmap Service not available");
             }
             else
             {
@@ -225,6 +227,25 @@ private:
                 goal_status_ = GoalStatus::NONE;
                 RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), log_interval_, "CostMap cleared");
             }
+        }
+
+        if (joy_msg.buttons[6])
+        {
+            pid_status_.data = 0;
+            pid_pub_->publish(pid_status_);
+        }
+
+        // cout << pid_button_pressed_ << endl;
+
+        if (joy_msg.buttons[7] && !pid_button_pressed_)
+        {
+            pid_button_pressed_ = true;
+            pid_status_.data = ((pid_status_.data + 1) % 3) + 1;
+            pid_pub_->publish(pid_status_);
+        }
+        else if (joy_msg.buttons[7] == 0 && pid_button_pressed_)
+        {
+            pid_button_pressed_ = false;
         }
     }
 
@@ -252,6 +273,7 @@ private:
     rclcpp::Subscription<sensor_msgs::msg::Joy>::SharedPtr joy_sub_;
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_pub_;
     rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr goal_pub_;
+    rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr pid_pub_;
     rclcpp::Client<action_msgs::srv::CancelGoal>::SharedPtr cancel_goal_client_;
     rclcpp::Client<nav2_msgs::srv::ClearEntireCostmap>::SharedPtr clear_costmap_client_;
     rclcpp::TimerBase::SharedPtr timer_;
@@ -267,12 +289,15 @@ private:
     bool y_goal_set_;
 
     int log_interval_;
+    bool pid_button_pressed_;
 
     GoalStatus goal_status_;
 
     geometry_msgs::msg::PoseStamped home_;
     geometry_msgs::msg::PoseStamped x_goal_;
     geometry_msgs::msg::PoseStamped y_goal_;
+
+    std_msgs::msg::Int32 pid_status_;
 
     std::shared_ptr<tf2_ros::TransformListener> tf_listener_{nullptr};
     std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
