@@ -1,0 +1,15 @@
+- [x] deadman
+- [x] vel increment decrement
+- [x] send home (using struct)
+- [x] store x pose
+- [x] store y pose
+- [x] send x goal
+- [x] send y goal
+- [ ] cancel goal
+- [ ] stop pid 
+- [ ] clear costmap
+- [ ] change pid mode
+- [ ] [Bug] no limit on L and A scale these should not be less than zero
+- [ ] [Bug] check for service availability of clear costmap and cancel goal
+- [ ] [Bug] check if goal is stored before sending x and y
+- [ ] [Feature] Use action server instead of topic and service
