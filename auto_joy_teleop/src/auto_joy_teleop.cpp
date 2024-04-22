@@ -11,6 +11,7 @@
 #include "sensor_msgs/msg/joy.hpp"
 #include "rclcpp/time_source.hpp"
 #include "action_msgs/srv/cancel_goal.hpp"
+#include "nav2_msgs/srv/clear_entire_costmap.hpp"
 
 #include "tf2/exceptions.h"
 #include "tf2_ros/transform_listener.h"
@@ -36,6 +37,7 @@ public:
         cmd_vel_pub_ = this->create_publisher<geometry_msgs::msg::Twist>("cmd_vel", 10);
         goal_pub_ = this->create_publisher<geometry_msgs::msg::PoseStamped>("goal_pose", 10);
         cancel_goal_client_ = this->create_client<action_msgs::srv::CancelGoal>("/navigate_to_pose/_action/cancel_goal");
+        clear_costmap_client_ = this->create_client<nav2_msgs::srv::ClearEntireCostmap>("/local_costmap/clear_entirely_local_costmap");
         timer_ = this->create_wall_timer(20ms, std::bind(&AutoJoyTeleop::master_callback, this));
 
         tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
@@ -60,6 +62,9 @@ public:
         home_.pose.orientation.z = 0.0;
         home_.pose.orientation.w = 1.0;
 
+        x_goal_set_ = false;
+        y_goal_set_ = false;
+
         RCLCPP_INFO(this->get_logger(), "[NODE INITIATED]");
     }
 
@@ -82,18 +87,21 @@ private:
     void joy_callback(const sensor_msgs::msg::Joy &joy_msg)
     {
         int x_axis = 1;
-        int y_axis = 0;
-        int z_axis = 3;
+        int y_axis = 3;
+        int z_axis = 0;
         int l_inc = 7;
         int a_inc = 6;
-        l_scale_ += joy_msg.axes[l_inc] * increment_;
-        a_scale_ += joy_msg.axes[a_inc] * increment_;
+
+        l_scale_ = l_scale_ >= 0.0 ? l_scale_ + joy_msg.axes[l_inc] * increment_ : 0.0;
+        a_scale_ = a_scale_ >= 0.0 ? a_scale_ + joy_msg.axes[a_inc] * increment_ : 0.0;
+
         x_vel_ = joy_msg.axes[2] < 0.0 ? l_scale_ * joy_msg.axes[x_axis] : 0.0;
         y_vel_ = joy_msg.axes[2] < 0.0 ? l_scale_ * joy_msg.axes[y_axis] : 0.0;
         z_vel_ = joy_msg.axes[2] < 0.0 ? a_scale_ * joy_msg.axes[z_axis] : 0.0;
 
         if (joy_msg.buttons[0] && goal_status_ != GoalStatus::HOME)
         {
+
             goal_pub_->publish(home_);
             goal_status_ = GoalStatus::HOME;
             RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), log_interval_, "Setting Robot Goal: HOME");
@@ -102,22 +110,42 @@ private:
         {
             auto request = std::make_shared<action_msgs::srv::CancelGoal::Request>();
 
-            auto result = cancel_goal_client_->async_send_request(request);
-
-            goal_status_ = GoalStatus::NONE;
-            RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), log_interval_, "Cancelling Current Goal");
+            if (!cancel_goal_client_->service_is_ready())
+            {
+                RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), log_interval_, "Cancel Goal Service not available");
+            }
+            else
+            {
+                auto result = cancel_goal_client_->async_send_request(request);
+                goal_status_ = GoalStatus::NONE;
+                RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), log_interval_, "Cancelling Current Goal");
+            }
         }
         else if (joy_msg.buttons[2] && goal_status_ != GoalStatus::X)
         {
-            goal_pub_->publish(x_goal_);
-            goal_status_ = GoalStatus::X;
-            RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), log_interval_, "Setting Robot Goal: X");
+            if (x_goal_set_)
+            {
+                goal_pub_->publish(x_goal_);
+                goal_status_ = GoalStatus::X;
+                RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), log_interval_, "Setting Robot Goal: X");
+            }
+            else
+            {
+                RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), log_interval_, "Store X goal before send goal");
+            }
         }
         else if (joy_msg.buttons[3] && goal_status_ != GoalStatus::Y)
         {
-            goal_pub_->publish(y_goal_);
-            goal_status_ = GoalStatus::Y;
-            RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), log_interval_, "Setting Robot Goal: Y");
+            if (y_goal_set_)
+            {
+                goal_pub_->publish(y_goal_);
+                goal_status_ = GoalStatus::Y;
+                RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), log_interval_, "Setting Robot Goal: Y");
+            }
+            else
+            {
+                RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), log_interval_, "Store Y goal before send goal");
+            }
         }
 
         if (joy_msg.buttons[4])
@@ -141,6 +169,8 @@ private:
 
                 tf2::Quaternion quats(x_goal_.pose.orientation.x, x_goal_.pose.orientation.y, x_goal_.pose.orientation.z, x_goal_.pose.orientation.w);
                 tf2::Matrix3x3(quats).getRPY(roll, pitch, yaw);
+
+                x_goal_set_ = true;
 
                 RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), log_interval_, "Stored X pose: (%f, %f, %f)", x_goal_.pose.position.x, x_goal_.pose.position.y, yaw);
             }
@@ -171,11 +201,29 @@ private:
                 tf2::Quaternion quats(y_goal_.pose.orientation.x, y_goal_.pose.orientation.y, y_goal_.pose.orientation.z, y_goal_.pose.orientation.w);
                 tf2::Matrix3x3(quats).getRPY(roll, pitch, yaw);
 
+                y_goal_set_ = true;
+
                 RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), log_interval_, "Stored Y pose: (%f, %f, %f)", y_goal_.pose.position.x, y_goal_.pose.position.y, yaw);
             }
             catch (const tf2::TransformException &ex)
             {
                 RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), log_interval_, "Could not transform %s to %s: %s", "base_link", "map", ex.what());
+            }
+        }
+
+        if (joy_msg.buttons[8])
+        {
+            auto request = std::make_shared<nav2_msgs::srv::ClearEntireCostmap::Request>();
+
+            if (!clear_costmap_client_->service_is_ready())
+            {
+                RCLCPP_WARM_THROTTLE(this->get_logger(), *this->get_clock(), log_interval_, "Clear Costmap Service not available");
+            }
+            else
+            {
+                auto result = clear_costmap_client_->async_send_request(request);
+                goal_status_ = GoalStatus::NONE;
+                RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), log_interval_, "CostMap cleared");
             }
         }
     }
@@ -205,6 +253,7 @@ private:
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_pub_;
     rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr goal_pub_;
     rclcpp::Client<action_msgs::srv::CancelGoal>::SharedPtr cancel_goal_client_;
+    rclcpp::Client<nav2_msgs::srv::ClearEntireCostmap>::SharedPtr clear_costmap_client_;
     rclcpp::TimerBase::SharedPtr timer_;
 
     float a_scale_;
@@ -213,6 +262,9 @@ private:
     float y_vel_;
     float z_vel_;
     float increment_;
+
+    bool x_goal_set_;
+    bool y_goal_set_;
 
     int log_interval_;
 

@@ -5,11 +5,11 @@
 - [x] store y pose
 - [x] send x goal
 - [x] send y goal
-- [ ] cancel goal
+- [x] cancel goal
+- [x] clear costmap
 - [ ] stop pid 
-- [ ] clear costmap
 - [ ] change pid mode
-- [ ] [Bug] no limit on L and A scale these should not be less than zero
-- [ ] [Bug] check for service availability of clear costmap and cancel goal
-- [ ] [Bug] check if goal is stored before sending x and y
+- [x] [Bug] no limit on L and A scale these should not be less than zero
+- [x] [Bug] check for service availability of clear costmap and cancel goal
+- [x] [Bug] check if goal is stored before sending x and y (Using Flags)
 - [ ] [Feature] Use action server instead of topic and service
