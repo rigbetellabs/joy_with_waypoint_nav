@@ -9,6 +9,7 @@
 #include "geometry_msgs/msg/twist.hpp"
 #include "geometry_msgs/msg/pose_stamped.hpp"
 #include "sensor_msgs/msg/joy.hpp"
+#include "sensor_msgs/msg/joy_feedback.hpp"
 #include "rclcpp/time_source.hpp"
 #include "action_msgs/srv/cancel_goal.hpp"
 #include "nav2_msgs/srv/clear_entire_costmap.hpp"
@@ -37,10 +38,12 @@ public:
         joy_sub_ = this->create_subscription<sensor_msgs::msg::Joy>("joy", 10, std::bind(&AutoJoyTeleop::joy_callback, this, placeholders::_1));
         cmd_vel_pub_ = this->create_publisher<geometry_msgs::msg::Twist>("cmd_vel", 10);
         goal_pub_ = this->create_publisher<geometry_msgs::msg::PoseStamped>("goal_pose", 10);
+        rumble_pub_ = this->create_publisher<sensor_msgs::msg::JoyFeedback>("/joy/set_feedback", 10);
         pid_pub_ = this->create_publisher<std_msgs::msg::Int32>("pid/control", 10);
         cancel_goal_client_ = this->create_client<action_msgs::srv::CancelGoal>("/navigate_to_pose/_action/cancel_goal");
         clear_costmap_client_ = this->create_client<nav2_msgs::srv::ClearEntireCostmap>("/local_costmap/clear_entirely_local_costmap");
         timer_ = this->create_wall_timer(20ms, std::bind(&AutoJoyTeleop::master_callback, this));
+        rumble_timer_ = this->create_wall_timer(100ms, std::bind(&AutoJoyTeleop::rumble_callback, this)); // Lower period than 100ms wont lead to any significant effect
 
         tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
         tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
@@ -51,6 +54,9 @@ public:
         increment_ = 0.01;
 
         goal_status_ = GoalStatus::NONE;
+
+        rumble_clear_costmap_ = 0;
+        rumble_cancel_goal_ = 0;
 
         log_interval_ = 2000;
 
@@ -66,6 +72,9 @@ public:
 
         x_goal_set_ = false;
         y_goal_set_ = false;
+
+        rumble_.type = sensor_msgs::msg::JoyFeedback::TYPE_RUMBLE;
+        rumble_.id = 0;
 
         RCLCPP_INFO(this->get_logger(), "[NODE INITIATED]");
     }
@@ -118,6 +127,7 @@ private:
             }
             else
             {
+                cancelled_goal_ = true;
                 auto result = cancel_goal_client_->async_send_request(request);
                 goal_status_ = GoalStatus::NONE;
                 RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), log_interval_, "Cancelling Current Goal");
@@ -173,6 +183,7 @@ private:
                 tf2::Matrix3x3(quats).getRPY(roll, pitch, yaw);
 
                 x_goal_set_ = true;
+                xy_goal_ = true;
 
                 RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), log_interval_, "Stored X pose: (%f, %f, %f)", x_goal_.pose.position.x, x_goal_.pose.position.y, yaw);
             }
@@ -204,6 +215,7 @@ private:
                 tf2::Matrix3x3(quats).getRPY(roll, pitch, yaw);
 
                 y_goal_set_ = true;
+                xy_goal_ = true;
 
                 RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), log_interval_, "Stored Y pose: (%f, %f, %f)", y_goal_.pose.position.x, y_goal_.pose.position.y, yaw);
             }
@@ -223,8 +235,8 @@ private:
             }
             else
             {
+                cleared_costmap_ = true;
                 auto result = clear_costmap_client_->async_send_request(request);
-                goal_status_ = GoalStatus::NONE;
                 RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), log_interval_, "CostMap cleared");
             }
         }
@@ -234,8 +246,6 @@ private:
             pid_status_.data = 0;
             pid_pub_->publish(pid_status_);
         }
-
-        // cout << pid_button_pressed_ << endl;
 
         if (joy_msg.buttons[7] && !pid_button_pressed_)
         {
@@ -270,12 +280,54 @@ private:
         }
     }
 
+    void rumble_callback()
+    {
+        if (cleared_costmap_)
+        {
+            rumble_clear_costmap_++;
+            rumble_.intensity = rumble_clear_costmap_ % 2;
+            if (rumble_clear_costmap_ > 7)
+            {
+                rumble_clear_costmap_ = 0;
+                cleared_costmap_ = false;
+            }
+        }
+
+        if (cancelled_goal_)
+        {
+            rumble_cancel_goal_++;
+            rumble_.intensity = (rumble_cancel_goal_ / 8) ^ 1;
+            if (rumble_cancel_goal_ > 7)
+            {
+                rumble_cancel_goal_ = 0;
+                cancelled_goal_ = false;
+            }
+        }
+
+        if (xy_goal_)
+        {
+            rumble_xy_goal_++;
+            rumble_.intensity = ((rumble_xy_goal_ % 6) < 3) ? 1 : 0;
+
+            if (rumble_xy_goal_ > 9)
+            {
+                rumble_xy_goal_ = 0;
+                xy_goal_ = false;
+            }
+
+        }
+
+        rumble_pub_->publish(rumble_);
+    }
+
     rclcpp::Subscription<sensor_msgs::msg::Joy>::SharedPtr joy_sub_;
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_pub_;
     rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr goal_pub_;
+    rclcpp::Publisher<sensor_msgs::msg::JoyFeedback>::SharedPtr rumble_pub_;
     rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr pid_pub_;
     rclcpp::Client<action_msgs::srv::CancelGoal>::SharedPtr cancel_goal_client_;
     rclcpp::Client<nav2_msgs::srv::ClearEntireCostmap>::SharedPtr clear_costmap_client_;
+    rclcpp::TimerBase::SharedPtr rumble_timer_;
     rclcpp::TimerBase::SharedPtr timer_;
 
     float a_scale_;
@@ -291,11 +343,21 @@ private:
     int log_interval_;
     bool pid_button_pressed_;
 
+    bool cleared_costmap_;
+    bool cancelled_goal_;
+    bool xy_goal_;
+
+    int rumble_clear_costmap_;
+    int rumble_cancel_goal_;
+    int rumble_xy_goal_;
+
     GoalStatus goal_status_;
 
     geometry_msgs::msg::PoseStamped home_;
     geometry_msgs::msg::PoseStamped x_goal_;
     geometry_msgs::msg::PoseStamped y_goal_;
+
+    sensor_msgs::msg::JoyFeedback rumble_;
 
     std_msgs::msg::Int32 pid_status_;
 
