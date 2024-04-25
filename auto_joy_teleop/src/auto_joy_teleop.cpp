@@ -96,7 +96,7 @@ private:
         y_vel_ = joy_msg.axes[2] < 0.0 ? l_scale_ * joy_msg.axes[y_axis] : 0.0;
         z_vel_ = joy_msg.axes[2] < 0.0 ? a_scale_ * joy_msg.axes[z_axis] : 0.0;
 
-        if (joy_msg.axes[2] < 0.0)
+        if (joy_msg.axes[2] < 1.0)
         {
             auto robot_vel = geometry_msgs::msg::Twist();
             robot_vel.linear.x = x_vel_;
