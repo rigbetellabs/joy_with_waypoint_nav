@@ -42,7 +42,6 @@ public:
         pid_pub_ = this->create_publisher<std_msgs::msg::Int32>("pid/control", 10);
         cancel_goal_client_ = this->create_client<action_msgs::srv::CancelGoal>("/navigate_to_pose/_action/cancel_goal");
         clear_costmap_client_ = this->create_client<nav2_msgs::srv::ClearEntireCostmap>("/local_costmap/clear_entirely_local_costmap");
-        timer_ = this->create_wall_timer(100ms, std::bind(&AutoJoyTeleop::master_callback, this));
         rumble_timer_ = this->create_wall_timer(100ms, std::bind(&AutoJoyTeleop::rumble_callback, this)); // Lower period than 100ms wont lead to any significant effect
 
         tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
@@ -73,6 +72,8 @@ public:
         x_goal_set_ = false;
         y_goal_set_ = false;
 
+        trigger_ = false;
+
         rumble_.type = sensor_msgs::msg::JoyFeedback::TYPE_RUMBLE;
         rumble_.id = 0;
 
@@ -80,22 +81,6 @@ public:
     }
 
 private:
-    void master_callback()
-    {
-        // log_info();
-        if (trigger_){
-        auto robot_vel = geometry_msgs::msg::Twist();
-        robot_vel.linear.x = x_vel_;
-        robot_vel.linear.y = y_vel_;
-        robot_vel.linear.z = 0.0;
-        robot_vel.angular.x = 0.0;
-        robot_vel.angular.y = 0.0;
-        robot_vel.angular.z = z_vel_;
-
-        cmd_vel_pub_->publish(robot_vel);
-        }
-    }
-
     void joy_callback(const sensor_msgs::msg::Joy &joy_msg)
     {
         int x_axis = 1;
@@ -105,11 +90,43 @@ private:
         int a_inc = 6;
 
         l_scale_ = l_scale_ >= 0.0 ? l_scale_ + joy_msg.axes[l_inc] * increment_ : 0.0;
-        a_scale_ = a_scale_ >= 0.0 ? a_scale_ + joy_msg.axes[a_inc] * increment_ : 0.0;
-        trigger_ =  joy_msg.axes[2] < 0.0 ;
+        a_scale_ = a_scale_ >= 0.0 ? a_scale_ - joy_msg.axes[a_inc] * increment_ : 0.0;
+
         x_vel_ = joy_msg.axes[2] < 0.0 ? l_scale_ * joy_msg.axes[x_axis] : 0.0;
         y_vel_ = joy_msg.axes[2] < 0.0 ? l_scale_ * joy_msg.axes[y_axis] : 0.0;
         z_vel_ = joy_msg.axes[2] < 0.0 ? a_scale_ * joy_msg.axes[z_axis] : 0.0;
+
+        if (joy_msg.axes[2] < 0.0)
+        {
+            auto robot_vel = geometry_msgs::msg::Twist();
+            robot_vel.linear.x = x_vel_;
+            robot_vel.linear.y = y_vel_;
+            robot_vel.linear.z = 0.0;
+            robot_vel.angular.x = 0.0;
+            robot_vel.angular.y = 0.0;
+            robot_vel.angular.z = z_vel_;
+
+            trigger_ = true;
+
+            cmd_vel_pub_->publish(robot_vel);
+        }
+        else
+        {
+            if (trigger_)
+            {
+                auto robot_vel = geometry_msgs::msg::Twist();
+                robot_vel.linear.x = 0.0;
+                robot_vel.linear.y = 0.0;
+                robot_vel.linear.z = 0.0;
+                robot_vel.angular.x = 0.0;
+                robot_vel.angular.y = 0.0;
+                robot_vel.angular.z = 0.0;
+
+                cmd_vel_pub_->publish(robot_vel);
+
+                trigger_ = false;
+            }
+        }
 
         if (joy_msg.buttons[0] && goal_status_ != GoalStatus::HOME)
         {
@@ -244,14 +261,19 @@ private:
 
         if (joy_msg.buttons[6])
         {
-            pid_status_.data = 0;
+            pid_value_ = 0;
+            pid_status_.data = pid_value_;
+
+            RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), log_interval_, "PID status: 0");
             pid_pub_->publish(pid_status_);
         }
 
         if (joy_msg.buttons[7] && !pid_button_pressed_)
         {
             pid_button_pressed_ = true;
-            pid_status_.data = ((pid_status_.data + 1) % 3) + 1;
+            pid_status_.data = (pid_value_ % 3) + 1;
+            pid_value_++;
+            RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), log_interval_, "PID status: %d", pid_status_.data);
             pid_pub_->publish(pid_status_);
         }
         else if (joy_msg.buttons[7] == 0 && pid_button_pressed_)
@@ -315,7 +337,6 @@ private:
                 rumble_xy_goal_ = 0;
                 xy_goal_ = false;
             }
-
         }
 
         rumble_pub_->publish(rumble_);
@@ -329,7 +350,6 @@ private:
     rclcpp::Client<action_msgs::srv::CancelGoal>::SharedPtr cancel_goal_client_;
     rclcpp::Client<nav2_msgs::srv::ClearEntireCostmap>::SharedPtr clear_costmap_client_;
     rclcpp::TimerBase::SharedPtr rumble_timer_;
-    rclcpp::TimerBase::SharedPtr timer_;
 
     float a_scale_;
     float l_scale_;
@@ -352,6 +372,7 @@ private:
     uint8_t rumble_clear_costmap_;
     uint8_t rumble_cancel_goal_;
     uint8_t rumble_xy_goal_;
+    uint8_t pid_value_;
 
     GoalStatus goal_status_;
 

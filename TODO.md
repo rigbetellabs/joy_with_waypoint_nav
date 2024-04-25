@@ -13,7 +13,10 @@
 - [x] [Bug] no limit on L and A scale these should not be less than zero
 - [x] [Bug] check for service availability of clear costmap and cancel goal
 - [x] [Bug] check if goal is stored before sending x and y (Using Flags)
+- [x] [Bug] pid should increment and every time zero pid is pressed next time it should start from zero
+- [ ] [Bug] trigger lock only for the first time
 - [ ] [Feature] Use action server instead of topic and service
 - [ ] [Feature] optimize for modern cpp
   - [ ] memory management using definite variable types
 - [ ] [Enhancement] fuse flags into single variable
+- [ ] [Enhancement] Cmd vel pub using joy freq, create master callback and handle trigger flags
