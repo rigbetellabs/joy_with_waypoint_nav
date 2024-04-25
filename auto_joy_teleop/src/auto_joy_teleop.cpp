@@ -42,7 +42,7 @@ public:
         pid_pub_ = this->create_publisher<std_msgs::msg::Int32>("pid/control", 10);
         cancel_goal_client_ = this->create_client<action_msgs::srv::CancelGoal>("/navigate_to_pose/_action/cancel_goal");
         clear_costmap_client_ = this->create_client<nav2_msgs::srv::ClearEntireCostmap>("/local_costmap/clear_entirely_local_costmap");
-        timer_ = this->create_wall_timer(20ms, std::bind(&AutoJoyTeleop::master_callback, this));
+        timer_ = this->create_wall_timer(100ms, std::bind(&AutoJoyTeleop::master_callback, this));
         rumble_timer_ = this->create_wall_timer(100ms, std::bind(&AutoJoyTeleop::rumble_callback, this)); // Lower period than 100ms wont lead to any significant effect
 
         tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
@@ -83,7 +83,7 @@ private:
     void master_callback()
     {
         // log_info();
-
+        if (trigger_){
         auto robot_vel = geometry_msgs::msg::Twist();
         robot_vel.linear.x = x_vel_;
         robot_vel.linear.y = y_vel_;
@@ -93,6 +93,7 @@ private:
         robot_vel.angular.z = z_vel_;
 
         cmd_vel_pub_->publish(robot_vel);
+        }
     }
 
     void joy_callback(const sensor_msgs::msg::Joy &joy_msg)
@@ -105,7 +106,7 @@ private:
 
         l_scale_ = l_scale_ >= 0.0 ? l_scale_ + joy_msg.axes[l_inc] * increment_ : 0.0;
         a_scale_ = a_scale_ >= 0.0 ? a_scale_ + joy_msg.axes[a_inc] * increment_ : 0.0;
-
+        trigger_ =  joy_msg.axes[2] < 0.0 ;
         x_vel_ = joy_msg.axes[2] < 0.0 ? l_scale_ * joy_msg.axes[x_axis] : 0.0;
         y_vel_ = joy_msg.axes[2] < 0.0 ? l_scale_ * joy_msg.axes[y_axis] : 0.0;
         z_vel_ = joy_msg.axes[2] < 0.0 ? a_scale_ * joy_msg.axes[z_axis] : 0.0;
@@ -335,6 +336,7 @@ private:
     float x_vel_;
     float y_vel_;
     float z_vel_;
+    bool trigger_;
     float increment_;
 
     bool x_goal_set_;
