@@ -16,3 +16,4 @@
 - [ ] [Feature] Use action server instead of topic and service
 - [ ] [Feature] optimize for modern cpp
   - [ ] memory management using definite variable types
+- [ ] [Enhancement] fuse flags into single variable

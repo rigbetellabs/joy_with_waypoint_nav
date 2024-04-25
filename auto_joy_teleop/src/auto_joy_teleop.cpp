@@ -347,9 +347,9 @@ private:
     bool cancelled_goal_;
     bool xy_goal_;
 
-    int rumble_clear_costmap_;
-    int rumble_cancel_goal_;
-    int rumble_xy_goal_;
+    uint8_t rumble_clear_costmap_;
+    uint8_t rumble_cancel_goal_;
+    uint8_t rumble_xy_goal_;
 
     GoalStatus goal_status_;
 
