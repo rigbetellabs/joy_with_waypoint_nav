@@ -122,9 +122,10 @@ private:
                 robot_vel.angular.y = 0.0;
                 robot_vel.angular.z = 0.0;
 
+                trigger_ = false;
+
                 cmd_vel_pub_->publish(robot_vel);
 
-                trigger_ = false;
             }
         }
 
@@ -356,7 +357,6 @@ private:
     float x_vel_;
     float y_vel_;
     float z_vel_;
-    bool trigger_;
     float increment_;
 
     bool x_goal_set_;
@@ -364,6 +364,8 @@ private:
 
     int log_interval_;
     bool pid_button_pressed_;
+
+    bool trigger_;
 
     bool cleared_costmap_;
     bool cancelled_goal_;
