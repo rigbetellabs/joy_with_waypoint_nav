@@ -40,10 +40,11 @@ public:
         goal_pub_ = this->create_publisher<geometry_msgs::msg::PoseStamped>("goal_pose", 10);
         rumble_pub_ = this->create_publisher<sensor_msgs::msg::JoyFeedback>("/joy/set_feedback", 10);
         pid_pub_ = this->create_publisher<std_msgs::msg::Int32>("pid/control", 10);
+        nav_status_pub_ = this->create_publisher<std_msgs::msg::Int32>("robot/nav_status", 10);
         cancel_goal_client_ = this->create_client<action_msgs::srv::CancelGoal>("/navigate_to_pose/_action/cancel_goal");
         clear_costmap_client_ = this->create_client<nav2_msgs::srv::ClearEntireCostmap>("/local_costmap/clear_entirely_local_costmap");
         rumble_timer_ = this->create_wall_timer(100ms, std::bind(&AutoJoyTeleop::rumble_callback, this)); // Lower period than 100ms wont lead to any significant effect
-
+        
         tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
         tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
 
@@ -203,6 +204,9 @@ private:
 
                 x_goal_set_ = true;
                 xy_goal_ = true;
+                std_msgs::msg::Int32 goal_status_code;
+                goal_status_code.data = 5;
+                nav_status_pub_->publish(goal_status_code);
 
                 RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), log_interval_, "Stored X pose: (%f, %f, %f)", x_goal_.pose.position.x, x_goal_.pose.position.y, yaw);
             }
@@ -235,6 +239,9 @@ private:
 
                 y_goal_set_ = true;
                 xy_goal_ = true;
+                std_msgs::msg::Int32 goal_status_code;
+                goal_status_code.data = 5;
+                nav_status_pub_->publish(goal_status_code);
 
                 RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), log_interval_, "Stored Y pose: (%f, %f, %f)", y_goal_.pose.position.x, y_goal_.pose.position.y, yaw);
             }
@@ -257,6 +264,9 @@ private:
                 cleared_costmap_ = true;
                 auto result = clear_costmap_client_->async_send_request(request);
                 RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), log_interval_, "CostMap cleared");
+                std_msgs::msg::Int32 goal_status_code;
+                goal_status_code.data = 4;
+                nav_status_pub_->publish(goal_status_code);
             }
         }
 
@@ -348,6 +358,7 @@ private:
     rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr goal_pub_;
     rclcpp::Publisher<sensor_msgs::msg::JoyFeedback>::SharedPtr rumble_pub_;
     rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr pid_pub_;
+    rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr nav_status_pub_;
     rclcpp::Client<action_msgs::srv::CancelGoal>::SharedPtr cancel_goal_client_;
     rclcpp::Client<nav2_msgs::srv::ClearEntireCostmap>::SharedPtr clear_costmap_client_;
     rclcpp::TimerBase::SharedPtr rumble_timer_;
