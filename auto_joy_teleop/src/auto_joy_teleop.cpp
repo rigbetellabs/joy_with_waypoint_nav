@@ -2,408 +2,295 @@
 #include <geometry_msgs/Twist.h>
 #include <geometry_msgs/PoseStamped.h>
 #include <sensor_msgs/Joy.h>
+#include <ros/console.h>
 #include <nav_msgs/Odometry.h>
 #include <actionlib_msgs/GoalID.h>
 #include <actionlib_msgs/GoalStatusArray.h>
 #include <std_msgs/Int32.h>
 #include <sensor_msgs/JoyFeedbackArray.h>
+#include <sensor_msgs/JoyFeedback.h>
 #include <std_srvs/Empty.h>
+#include <unistd.h>
 
-#include <tf/transform_datatypes.h>
-
-using namespace std;
-
-class AutoJoyTeleop
+class TeleopHoverboard
 {
 public:
-  AutoJoyTeleop()
-  {
-    cmd_vel_pub_ = nh_.advertise<geometry_msgs::Twist>("/cmd_vel", 10, true);
-    goal_pub_ = nh_.advertise<geometry_msgs::PoseStamped>("move_base_simple/goal", 1);
-    goal_cancel_pub_ = nh_.advertise<actionlib_msgs::GoalID>("move_base/cancel", 1);
-    rumble_pub_ = nh_.advertise<sensor_msgs::JoyFeedbackArray>("/joy/set_feedback", 10);
-    pid_pub_ = nh_.advertise<std_msgs::Int32>("pid/control", 1);
-    nav_status_pub_ = nh_.advertise<std_msgs::Int32>("robot/nav_status", 1);
-
-    joy_sub_ = nh_.subscribe<sensor_msgs::Joy>("joy", 10, &AutoJoyTeleop::joyCallback, this);
-    odom_sub_ = nh_.subscribe<nav_msgs::Odometry>("odom", 10, &AutoJoyTeleop::odomCallback, this);
-
-    timer_ = nh_.createWallTimer(ros::WallDuration(1.0), &AutoJoyTeleop::timerCallback, this); // Duration between adjacent publishment should be atleast 1sec
-
-    a_scale_ = 0.5;
-    l_scale_ = 0.5;
-    x_vel_ = 0.0;
-    y_vel_ = 0.0;
-    z_vel_ = 0.0;
-    increment_ = 0.01;
-    trigger_ = false;
-
-    pid_value_ = 0;
-    pid_button_pressed_ = false;
-
-    rumble_clear_costmap_ = 0;
-    rumble_cancel_goal_ = 0;
-    rumble_xy_goal_ = 0;
-    cancelled_goal_ = false;
-    xy_goal_ = false;
-    cleared_costmap_ = false;
-    rumble_.type = sensor_msgs::JoyFeedback::TYPE_RUMBLE;
-    rumble_.id = 0;
-
-    x_goal_set_ = false;
-    y_goal_set_ = false;
-
-    home_.header.frame_id = "map";
-    home_.header.stamp = ros::Time::now();
-    home_.pose.position.x = 0.0;
-    home_.pose.position.y = 0.0;
-    home_.pose.position.z = 0.0;
-    home_.pose.orientation.x = 0.0;
-    home_.pose.orientation.y = 0.0;
-    home_.pose.orientation.z = 0.0;
-    home_.pose.orientation.w = 1.0;
-
-    ROS_INFO("[NODE INITIATED]");
-
-  }
+  TeleopHoverboard();
 
 private:
-
-  void timerCallback(const ros::WallTimerEvent&)
-  {
-    if (cleared_costmap_)
-    {
-      rumble_clear_costmap_++;
-      rumble_.intensity = rumble_clear_costmap_ % 2;
-      if (rumble_clear_costmap_ > 7)
-      {
-        rumble_clear_costmap_ = 0;
-        cleared_costmap_ = false;
-      }
-    }
-
-    if (cancelled_goal_)
-    {
-      rumble_cancel_goal_++;
-      rumble_.intensity = (rumble_cancel_goal_ / 8) ^ 1;
-      if (rumble_cancel_goal_ > 7)
-      {
-        rumble_cancel_goal_ = 0;
-        cancelled_goal_ = false;
-      }
-    }
-
-    if (xy_goal_)
-    {
-      rumble_xy_goal_++;
-      rumble_.intensity = ((rumble_xy_goal_ % 6) < 3) ? 1 : 0;
-
-      if (rumble_xy_goal_ > 9)
-      {
-        rumble_xy_goal_ = 0;
-        xy_goal_ = false;
-      }
-    }
-
-    sensor_msgs::JoyFeedbackArray rumble_array_;
-
-    rumble_array_.array.push_back(rumble_);
-
-    rumble_pub_.publish(rumble_array_);
-  }
-
-  void odomCallback(const nav_msgs::Odometry::ConstPtr &odom)
-  {
-    robot_pose = *odom;
-  }
-
-  void joyCallback(const sensor_msgs::Joy::ConstPtr &joy_msg)
-  {
-    /* ------------------------------------ TELEOP ------------------------------------ */
-    int x_axis = 1;
-    int y_axis = 3;
-    int z_axis = 0;
-    int l_inc = 7;
-    int a_inc = 6;
-
-    l_scale_ = l_scale_ >= 0.0 ? l_scale_ + joy_msg->axes[l_inc] * increment_ : 0.0;
-    a_scale_ = a_scale_ >= 0.0 ? a_scale_ - joy_msg->axes[a_inc] * increment_ : 0.0;
-
-    x_vel_ = joy_msg->axes[2] < 0.0 ? l_scale_ * joy_msg->axes[x_axis] : 0.0;
-    y_vel_ = joy_msg->axes[2] < 0.0 ? l_scale_ * joy_msg->axes[y_axis] : 0.0;
-    z_vel_ = joy_msg->axes[2] < 0.0 ? a_scale_ * joy_msg->axes[z_axis] : 0.0;
-
-    if (joy_msg->axes[2] < 1.0)
-    {
-      geometry_msgs::Twist robot_vel;
-      robot_vel.linear.x = x_vel_;
-      robot_vel.linear.y = y_vel_;
-      robot_vel.linear.z = 0.0;
-      robot_vel.angular.x = 0.0;
-      robot_vel.angular.y = 0.0;
-      robot_vel.angular.z = z_vel_;
-
-      trigger_ = true;
-
-      cmd_vel_pub_.publish(robot_vel);
-    }
-    else
-    {
-      if (trigger_)
-      {
-        geometry_msgs::Twist robot_vel;
-        robot_vel.linear.x = 0.0;
-        robot_vel.linear.y = 0.0;
-        robot_vel.linear.z = 0.0;
-        robot_vel.angular.x = 0.0;
-        robot_vel.angular.y = 0.0;
-        robot_vel.angular.z = 0.0;
-
-        trigger_ = false;
-
-        cmd_vel_pub_.publish(robot_vel);
-
-      }
-    }
-
-    /* ------------------------------------ PID ------------------------------------ */
-
-    if (joy_msg->buttons[6])
-    {
-      pid_value_ = 0;
-      pid_status_.data = pid_value_;
-
-      ROS_INFO("PID status: 0");
-      pid_pub_.publish(pid_status_);
-    }
-
-
-    if (joy_msg->buttons[7] && !pid_button_pressed_)
-    {
-      pid_button_pressed_ = true;
-      pid_status_.data = (pid_value_ % 3) + 1;
-      pid_value_++;
-      ROS_INFO("PID status: %d", pid_status_.data);
-      pid_pub_.publish(pid_status_);
-    }
-    else if (joy_msg->buttons[7] == 0 && pid_button_pressed_)
-    {
-      pid_button_pressed_ = false;
-    }
-
-    /* ------------------------------------ COSTMAP ------------------------------------ */
-
-    if (joy_msg->buttons[8])
-    {
-      ros::ServiceClient clear_costmap_client = nh_.serviceClient<std_srvs::Empty>("/move_base/clear_costmaps");
-
-      if (clear_costmap_client.exists())
-      {
-        std_srvs::Empty empty_msg;
-        clear_costmap_client.call(empty_msg);
-
-        cleared_costmap_ = true;
-
-        ROS_INFO("CostMap cleared");
-      }
-      else
-      {
-        ROS_WARN("Clear Costmap Service not available");
-      }
-    }
-
-
-    /* ------------------------------------ STORE POSE ------------------------------------ */
-
-    if (joy_msg->buttons[4])
-    {
-      x_goal_.header.frame_id = "map";
-      x_goal_.header.stamp = ros::Time::now();
-      x_goal_.pose.position.x = robot_pose.pose.pose.position.x;
-      x_goal_.pose.position.y = robot_pose.pose.pose.position.y;
-      x_goal_.pose.position.z = 0.0;
-      x_goal_.pose.orientation.x = 0.0;
-      x_goal_.pose.orientation.y = 0.0;
-      x_goal_.pose.orientation.z = robot_pose.pose.pose.orientation.z;
-      x_goal_.pose.orientation.w = robot_pose.pose.pose.orientation.w;
-
-      double roll, pitch, yaw;
-      tf::Quaternion quats(x_goal_.pose.orientation.x, x_goal_.pose.orientation.y, x_goal_.pose.orientation.z, x_goal_.pose.orientation.w);
-      tf::Matrix3x3(quats).getRPY(roll, pitch, yaw);
-
-      x_goal_set_ = true;
-
-      ROS_INFO("Stored X pose: (%f, %f, %f)", x_goal_.pose.position.x, x_goal_.pose.position.y, yaw);
-    }
-
-    if (joy_msg->buttons[5])
-    {
-      y_goal_.header.frame_id = "map";
-      y_goal_.header.stamp = ros::Time::now();
-      y_goal_.pose.position.x = robot_pose.pose.pose.position.x;
-      y_goal_.pose.position.y = robot_pose.pose.pose.position.y;
-      y_goal_.pose.position.z = 0.0;
-      y_goal_.pose.orientation.x = 0.0;
-      y_goal_.pose.orientation.y = 0.0;
-      y_goal_.pose.orientation.z = robot_pose.pose.pose.orientation.z;
-      y_goal_.pose.orientation.w = robot_pose.pose.pose.orientation.w;
-
-      double roll, pitch, yaw;
-      tf::Quaternion quats(y_goal_.pose.orientation.x, y_goal_.pose.orientation.y, y_goal_.pose.orientation.z, y_goal_.pose.orientation.w);
-      tf::Matrix3x3(quats).getRPY(roll, pitch, yaw);
-
-      y_goal_set_ = true;
-
-      ROS_INFO("Stored Y pose: (%f, %f, %f)", y_goal_.pose.position.x, y_goal_.pose.position.y, yaw);
-    }
-
-    /* ------------------------------------ SEND GOAL ------------------------------------ */
-
-    if (joy_msg->buttons[2])
-    {
-      if (x_goal_set_)
-      {
-        goal_pub_.publish(x_goal_);
-
-        std_msgs::Int32 goal_status_code;
-        goal_status_code.data = 5;
-        nav_status_pub_.publish(goal_status_code);
-
-        xy_goal_ = true;
-
-        ROS_INFO("Setting Robot Goal: X");
-      }
-      else
-      {
-        ROS_INFO("Store X goal before send goal");
-      }
-    }
-
-    if (joy_msg->buttons[3])
-    {
-      if (y_goal_set_)
-      {
-        goal_pub_.publish(y_goal_);
-
-        std_msgs::Int32 goal_status_code;
-        goal_status_code.data = 5;
-        nav_status_pub_.publish(goal_status_code);
-
-        xy_goal_ = true;
-
-        ROS_INFO("Setting Robot Goal: Y");
-      }
-      else
-      {
-        ROS_INFO("Store Y goal before send goal");
-      }
-    }
-
-    if (joy_msg->buttons[0])
-    {
-      goal_pub_.publish(home_);
-
-      std_msgs::Int32 goal_status_code;
-      goal_status_code.data = 5;
-      nav_status_pub_.publish(goal_status_code);
-
-      ROS_INFO("Setting Robot Goal: HOME");
-    }
-
-    /* ------------------------------------ CANCEL GOAL ------------------------------------ */
-
-    if (joy_msg->buttons[1])
-    {
-      actionlib_msgs::GoalID cancel_goal_;
-      goal_cancel_pub_.publish(cancel_goal_);
-
-      std_msgs::Int32 goal_status_code;
-      goal_status_code.data = 4;
-      nav_status_pub_.publish(goal_status_code);
-
-      cancelled_goal_ = true;
-
-      ROS_INFO_STREAM("Cancelling Current Goal");
-    }
-
-    /* ------------------------------------------------------------------------------ */
-  }
+  void joyCallback(const sensor_msgs::Joy::ConstPtr &joy);
+  void odomCallback(const nav_msgs::Odometry::ConstPtr &odom);
+  sensor_msgs::JoyFeedback createFeedback(double intensity);
+  void publishTwist(const sensor_msgs::Joy::ConstPtr &joy);
+  void stopTwist();
+  void publishHapticFeedback(const sensor_msgs::JoyFeedback &feedback, int duration_ms, int iterations);
+  void stopHapticFeedback();
+  void goalStatusCallback(const actionlib_msgs::GoalStatusArray::ConstPtr &status);
 
   ros::NodeHandle nh_;
 
-  ros::Publisher cmd_vel_pub_;
-  ros::Publisher goal_pub_;
-  ros::Publisher goal_cancel_pub_;
-  ros::Publisher rumble_pub_;
-  ros::Publisher pid_pub_;
-  ros::Publisher nav_status_pub_;
+  int linear_, angular_;
+  double l_scale_, a_scale_;
+  bool button7_pressed_last_time = false;
+  bool button6_pressed_last_time = false;
+  bool button4_pressed_last_time = false;
+  bool button5_pressed_last_time = false;
+  int pid_control_value = 1;
+  bool x_pose_stored_ = false;
+  bool y_pose_stored_ = false;
+  nav_msgs::Odometry odom_received;
+  geometry_msgs::PoseStamped home_pose_, pose_x_, pose_y_;
 
+  ros::Publisher vel_pub_;
+  ros::Publisher pose_pub_;
+  ros::Publisher goal_cancel_pub_;
+  ros::Publisher joy_feedback_pub_;
+  ros::Publisher pid_control_pub_;
+  ros::Publisher goal_status_pub_;
   ros::Subscriber joy_sub_;
   ros::Subscriber odom_sub_;
-
-  ros::WallTimer timer_;
-
-  sensor_msgs::JoyFeedback rumble_;
-
-  /* ------------------------------------ TELEOP ------------------------------------ */
-
-  float a_scale_;
-  float l_scale_;
-  float x_vel_;
-  float y_vel_;
-  float z_vel_;
-  float increment_;
-  bool trigger_;
-
-  /* ------------------------------------ PID ------------------------------------ */
-
-  uint8_t pid_value_;
-  std_msgs::Int32 pid_status_;
-  bool pid_button_pressed_;
-
-
-  /* ------------------------------------ COSTMAP ------------------------------------ */
-
-  bool cleared_costmap_;
-  uint8_t rumble_clear_costmap_;
-
-
-  /* ------------------------------------ CANCEL POSE ------------------------------------ */
-
-  bool cancelled_goal_;
-  uint8_t rumble_cancel_goal_;
-
-  /* ------------------------------------ STORE POSE ------------------------------------ */
-
-  nav_msgs::Odometry robot_pose;
-
-  geometry_msgs::PoseStamped x_goal_;
-  geometry_msgs::PoseStamped y_goal_;
-
-  bool x_goal_set_;
-  bool y_goal_set_;
-
-  bool xy_goal_;
-
-  uint8_t rumble_xy_goal_;
-
-
-  /* ------------------------------------ SEND GOAL ------------------------------------ */
-
-  geometry_msgs::PoseStamped home_;
-
-  /* ------------------------------------------------------------------------------ */
-
 };
 
+TeleopHoverboard::TeleopHoverboard() : linear_(1),
+                                       angular_(0)
+{
+  nh_.param("axis_linear", linear_, 1);
+  nh_.param("axis_angular", angular_, 0);
+  nh_.param("scale_angular", a_scale_, 0.6);
+  nh_.param("scale_linear", l_scale_, 0.3);
 
+  pose_x_.header.frame_id = "map";
+  pose_y_.header.frame_id = "map";
 
+  home_pose_.header.frame_id = "map";
+  home_pose_.pose.position.x = 0.0;
+  home_pose_.pose.position.y = 0.0;
+  home_pose_.pose.position.z = 0.0;
+  home_pose_.pose.orientation.w = 1.0;
+  home_pose_.pose.orientation.x = 0.0;
+  home_pose_.pose.orientation.y = 0.0;
+  home_pose_.pose.orientation.z = 0.0;
+
+  vel_pub_ = nh_.advertise<geometry_msgs::Twist>("/cmd_vel", 10, true);
+  pose_pub_ = nh_.advertise<geometry_msgs::PoseStamped>("move_base_simple/goal", 1);
+  goal_cancel_pub_ = nh_.advertise<actionlib_msgs::GoalID>("move_base/cancel", 1);
+  joy_feedback_pub_ = nh_.advertise<sensor_msgs::JoyFeedbackArray>("/joy/set_feedback", 10);
+  pid_control_pub_ = nh_.advertise<std_msgs::Int32>("pid/control", 1);
+  goal_status_pub_ = nh_.advertise<std_msgs::Int32>("robot/nav_status", 1);
+
+  joy_sub_ = nh_.subscribe<sensor_msgs::Joy>("joy", 10, &TeleopHoverboard::joyCallback, this);
+  odom_sub_ = nh_.subscribe<nav_msgs::Odometry>("odom", 10, &TeleopHoverboard::odomCallback, this);
+}
+
+void TeleopHoverboard::odomCallback(const nav_msgs::Odometry::ConstPtr &odom)
+{
+  odom_received = *odom;
+}
+
+sensor_msgs::JoyFeedback TeleopHoverboard::createFeedback(double intensity)
+{
+  sensor_msgs::JoyFeedback feedback;
+  feedback.type = 1;
+  feedback.id = 0;
+  feedback.intensity = intensity;
+  return feedback;
+}
+
+void TeleopHoverboard::publishTwist(const sensor_msgs::Joy::ConstPtr &joy)
+{
+  geometry_msgs::Twist twist;
+  twist.angular.z = a_scale_ * joy->axes[angular_];
+  twist.linear.x = l_scale_ * joy->axes[linear_];
+  twist.linear.y = l_scale_ * joy->axes[3];
+  vel_pub_.publish(twist);
+}
+
+void TeleopHoverboard::stopTwist()
+{
+  geometry_msgs::Twist twist;
+  twist.angular.z = 0.0;
+  twist.linear.x = 0.0;
+  twist.linear.y = 0.0;
+  vel_pub_.publish(twist);
+}
+
+void TeleopHoverboard::publishHapticFeedback(const sensor_msgs::JoyFeedback &feedback, int duration_ms, int iterations)
+{
+  for (int i = 0; i < iterations; i++)
+  {
+    sensor_msgs::JoyFeedbackArray feedback_array;
+    feedback_array.array.push_back(feedback);
+    joy_feedback_pub_.publish(feedback_array);
+    ros::Duration(duration_ms / 1000.0).sleep(); // Sleep for specified duration in ms
+    stopHapticFeedback();
+    ros::Duration(duration_ms / 2000.0).sleep();
+  }
+}
+
+void TeleopHoverboard::stopHapticFeedback()
+{
+  sensor_msgs::JoyFeedback stop_feedback;
+  stop_feedback.type = 1;
+  stop_feedback.id = 0;          // Assuming the same ID used for starting feedback
+  stop_feedback.intensity = 0.0; // Stop haptic feedback
+
+  sensor_msgs::JoyFeedbackArray feedback_array;
+  feedback_array.array.push_back(stop_feedback);
+  joy_feedback_pub_.publish(feedback_array);
+}
+
+void TeleopHoverboard::joyCallback(const sensor_msgs::Joy::ConstPtr &joy)
+{
+  if (joy->axes[7] == 1)
+  {
+    l_scale_ = std::max(0.0, l_scale_ + 0.1);
+    ROS_INFO_STREAM("Linear Scale Set to : " << l_scale_);
+  }
+  if (joy->axes[7] == -1)
+  {
+    l_scale_ = std::max(0.0, l_scale_ - 0.1);
+    ROS_INFO_STREAM("Linear Scale Set to : " << l_scale_);
+  }
+  if (joy->axes[6] == 1)
+  {
+    a_scale_ = std::max(0.0, a_scale_ - 0.1);
+    ROS_INFO_STREAM("Angular Scale Set to : " << a_scale_);
+  }
+  if (joy->axes[6] == -1)
+  {
+    a_scale_ = std::max(0.0, a_scale_ + 0.1);
+    ROS_INFO_STREAM("Angular Scale Set to : " << a_scale_);
+  }
+  if (joy->buttons[4] == 1 && !button4_pressed_last_time && !x_pose_stored_)
+  {
+    // Store pose_x_
+    pose_x_.pose = odom_received.pose.pose;
+    button4_pressed_last_time = true;
+    x_pose_stored_ = true;  // Set the flag
+    publishHapticFeedback(createFeedback(1.0), 200, 1);
+    ROS_INFO_STREAM("X pose store");
+    std_msgs::Int32 goal_status_code;
+    goal_status_code.data = 5;
+    goal_status_pub_.publish(goal_status_code);
+  }
+  else if (joy->buttons[4] == 0 && button4_pressed_last_time)
+  {
+    // Reset the flag when button 7 is released
+    button4_pressed_last_time = false;
+    x_pose_stored_ = false;  // Reset the flag
+  }
+
+  if (joy->buttons[5] == 1 && !button5_pressed_last_time && !y_pose_stored_)
+  {
+    // Store pose_y_
+    pose_y_.pose = odom_received.pose.pose;
+    button5_pressed_last_time = true;
+    y_pose_stored_ = true;  // Set the flag
+    publishHapticFeedback(createFeedback(1.0), 200, 1);
+    ROS_INFO_STREAM("Y pose store");
+    std_msgs::Int32 goal_status_code;
+    goal_status_code.data = 5;
+    goal_status_pub_.publish(goal_status_code);
+  }
+  else if (joy->buttons[5] == 0 && button5_pressed_last_time)
+  {
+    // Reset the flag when button 7 is released
+    button5_pressed_last_time = false;
+    y_pose_stored_ = false;  // Reset the flag
+  }
+
+  if (joy->buttons[0] == 1)
+  {
+    pose_pub_.publish(home_pose_);
+    ROS_INFO_STREAM("Publishing home position");
+  }
+
+  if (joy->buttons[1] == 1)
+  {
+    // Cancel the goal
+    actionlib_msgs::GoalID cancel_goal_;
+    goal_cancel_pub_.publish(cancel_goal_);
+    ROS_INFO_STREAM("Cancel Goal");
+
+    publishHapticFeedback(createFeedback(1.0), 200, 3);
+  }
+
+  if (joy->buttons[2] == 1)
+  {
+    pose_pub_.publish(pose_x_);
+  }
+  if (joy->buttons[3] == 1)
+  {
+    pose_pub_.publish(pose_y_);
+  }
+  if (joy->buttons[7] == 1 && !button7_pressed_last_time)
+  {
+    // Increment PID control value only when button 7 is pressed for the first time
+    pid_control_value++;
+    if (pid_control_value == 4)
+    {
+      pid_control_value = 1;
+    }
+    button7_pressed_last_time = true;
+    ROS_INFO_STREAM("PID Control Value Set to: " << pid_control_value);
+    std_msgs::Int32 pid_control_msg;
+    pid_control_msg.data = pid_control_value;
+    pid_control_pub_.publish(pid_control_msg);
+  }
+  else if (joy->buttons[7] == 0 && button7_pressed_last_time)
+  {
+    // Reset the flag when button 7 is released
+    button7_pressed_last_time = false;
+  }
+  if (joy->buttons[6] == 1 && !button6_pressed_last_time)
+  {
+    pid_control_value = 0;
+    button6_pressed_last_time = true;
+    ROS_INFO_STREAM("PID Control Disabled ");
+    std_msgs::Int32 pid_control_msg;
+    pid_control_msg.data = pid_control_value;
+    pid_control_pub_.publish(pid_control_msg);
+  }
+  else if (joy->buttons[6] == 0 && button6_pressed_last_time)
+  {
+    // Reset the flag when button 7 is released
+    button6_pressed_last_time = false;
+  }
+  if (joy->buttons[8] == 1)
+  {
+    // Call the service to clear the costmap
+    ros::ServiceClient clear_costmap_client = nh_.serviceClient<std_srvs::Empty>("/move_base/clear_costmaps");
+    std_srvs::Empty empty_msg;
+    if (clear_costmap_client.call(empty_msg))
+    {
+      ROS_INFO("Costmap cleared");
+      publishHapticFeedback(createFeedback(1.0), 300, 1);
+      std_msgs::Int32 goal_status_code;
+      goal_status_code.data = 4;
+      goal_status_pub_.publish(goal_status_code);
+    }
+    else
+    {
+      ROS_ERROR("Failed to call clear_costmap service");
+    }
+  }
+  if (joy->axes[2] < 0.0)
+  {
+    // Move based on joystick input
+    publishTwist(joy);
+  }
+  else
+  {
+    // Stop movement
+    stopTwist();
+  }
+}
 
 int main(int argc, char **argv)
 {
-  ros::init(argc, argv, "auto_joy_teleop");
+  ros::init(argc, argv, "teleop_Hoverboard");
 
-  AutoJoyTeleop autojoyteleop;
+  TeleopHoverboard teleop_Hoverboard;
 
   ros::spin();
 }
