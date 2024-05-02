@@ -10,3 +10,8 @@ Joy teleop package with waypoint based autonomous navigation using joy buttons
 ```
 
 ![autojoy](autojoyteleop.png)
+
+### Primary Issues with `/joy/feedback`
+
+- Controller responds to the published `/joy/feedback` messages only after 1 seconds
+- Duration between the two adjacent messages should be atleast 1 second, if duration between any two adjacent messages is less than 1 second the latter one will not be reflected on controller.

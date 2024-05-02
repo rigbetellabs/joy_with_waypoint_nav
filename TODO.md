@@ -1,0 +1,13 @@
+- [x] Change Control flow?
+- [x] Stop PID
+- [x] clearcostmap (confirm with actual service)
+- [x] change pid mode
+- [x] store goals
+- [x] send goal
+- [x] cancel goal
+- [x] home
+- [ ] rumble feedback  
+- [x] goal status for micro ros
+- [x] Remove not required libs
+- [x] Test on sim/robot
+- [x] [Bug] Delay observed when home pose and cancel goal log
