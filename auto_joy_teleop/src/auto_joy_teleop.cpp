@@ -75,7 +75,7 @@ TeleopHoverboard::TeleopHoverboard() : linear_(1),
   pose_pub_ = nh_.advertise<geometry_msgs::PoseStamped>("move_base_simple/goal", 1);
   goal_cancel_pub_ = nh_.advertise<actionlib_msgs::GoalID>("move_base/cancel", 1);
   joy_feedback_pub_ = nh_.advertise<sensor_msgs::JoyFeedbackArray>("/joy/set_feedback", 10);
-  pid_control_pub_ = nh_.advertise<std_msgs::Int32>("pid/control", 1);
+  pid_control_pub_ = nh_.advertise<std_msgs::Int32>("pid/mode", 1);
   goal_status_pub_ = nh_.advertise<std_msgs::Int32>("robot/nav_status", 1);
 
   joy_sub_ = nh_.subscribe<sensor_msgs::Joy>("joy", 10, &TeleopHoverboard::joyCallback, this);
