@@ -77,6 +77,8 @@ public:
 
         rumble_.type = sensor_msgs::msg::JoyFeedback::TYPE_RUMBLE;
         rumble_.id = 0;
+        start_time_1 = std::clock();
+        start_time_2 = std::clock();
 
         RCLCPP_INFO(this->get_logger(), "[NODE INITIATED]");
     }
@@ -108,8 +110,13 @@ private:
             robot_vel.angular.z = z_vel_;
 
             trigger_ = true;
-
-            cmd_vel_pub_->publish(robot_vel);
+            
+            now_time_1 = std::clock();
+            double elapsed_time = double(now_time_1 - start_time_1) / double(CLOCKS_PER_SEC);
+            if ( elapsed_time > THROTTLE_RATE ){
+                cmd_vel_pub_->publish(robot_vel);
+                start_time_1 = std::clock();
+            }
         }
         else
         {
@@ -124,9 +131,13 @@ private:
                 robot_vel.angular.z = 0.0;
 
                 trigger_ = false;
-
-                cmd_vel_pub_->publish(robot_vel);
-
+                
+                now_time_2 = std::clock();
+                double elapsed_time = double(now_time_2 - start_time_2) / double(CLOCKS_PER_SEC);
+                if ( elapsed_time > THROTTLE_RATE ){
+                    cmd_vel_pub_->publish(robot_vel);
+                    start_time_2 = std::clock();
+                }
             }
         }
 
@@ -399,6 +410,9 @@ private:
 
     std::shared_ptr<tf2_ros::TransformListener> tf_listener_{nullptr};
     std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
+    std::clock_t start_time_1, now_time_1, start_time_2, now_time_2;
+
+    double THROTTLE_RATE = 0.0005;
 };
 
 int main(int argc, char *argv[])
