@@ -148,7 +148,7 @@ private:
             goal_status_ = GoalStatus::HOME;
             RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), log_interval_, "Setting Robot Goal: HOME");
         }
-        else if (joy_msg.buttons[1] && goal_status_ != GoalStatus::NONE)
+        else if (joy_msg.buttons[1])
         {
             auto request = std::make_shared<action_msgs::srv::CancelGoal::Request>();
 
