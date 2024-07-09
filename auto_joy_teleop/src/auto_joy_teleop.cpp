@@ -63,7 +63,7 @@ public:
         home_.header.frame_id = "map";
         home_.header.stamp = this->now();
         home_.pose.position.x = 0.0;
-        home_.pose.position.y = 0.5;
+        home_.pose.position.y = 0.0;
         home_.pose.position.z = 0.0;
         home_.pose.orientation.x = 0.0;
         home_.pose.orientation.y = 0.0;
