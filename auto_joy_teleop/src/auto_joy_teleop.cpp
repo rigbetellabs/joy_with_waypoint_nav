@@ -392,7 +392,7 @@ private:
             if (rumble_hill_hold_ > 9)
             {
                 rumble_hill_hold_ = 0;
-                hill_hold_rumble_start_ = false
+                hill_hold_rumble_start_ = false;
 
             }
         }
