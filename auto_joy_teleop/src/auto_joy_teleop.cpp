@@ -35,6 +35,7 @@ class AutoJoyTeleop : public rclcpp::Node
 public:
     AutoJoyTeleop() : Node("auto_joy_teleop")
     {
+
         joy_sub_ = this->create_subscription<sensor_msgs::msg::Joy>("joy", 10, std::bind(&AutoJoyTeleop::joy_callback, this, placeholders::_1));
         cmd_vel_pub_ = this->create_publisher<geometry_msgs::msg::Twist>("cmd_vel", 10);
         goal_pub_ = this->create_publisher<geometry_msgs::msg::PoseStamped>("goal_pose", 10);
@@ -44,8 +45,8 @@ public:
         hill_hold_pub_ = this->create_publisher<std_msgs::msg::Bool>("hill_hold_control", 10);
         cancel_goal_client_ = this->create_client<action_msgs::srv::CancelGoal>("/navigate_to_pose/_action/cancel_goal");
         clear_costmap_client_ = this->create_client<nav2_msgs::srv::ClearEntireCostmap>("/local_costmap/clear_entirely_local_costmap");
-        rumble_timer_ = this->create_wall_timer(100ms, std::bind(&AutoJoyTeleop::rumble_callback, this)); // Lower period than 100ms won't lead to any significant effect
-
+        rumble_timer_ = this->create_wall_timer(100ms, std::bind(&AutoJoyTeleop::rumble_callback, this)); // Lower period than 100ms wont lead to any significant effect
+        
         tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
         tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
 
@@ -147,6 +148,7 @@ private:
 
         if (joy_msg.buttons[0] && goal_status_ != GoalStatus::HOME)
         {
+
             goal_pub_->publish(home_);
             goal_status_ = GoalStatus::HOME;
             RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), log_interval_, "Setting Robot Goal: HOME");
@@ -211,12 +213,22 @@ private:
                 x_goal_.pose.orientation.z = t.transform.rotation.z;
                 x_goal_.pose.orientation.w = t.transform.rotation.w;
 
+                double roll, pitch, yaw;
+
+                tf2::Quaternion quats(x_goal_.pose.orientation.x, x_goal_.pose.orientation.y, x_goal_.pose.orientation.z, x_goal_.pose.orientation.w);
+                tf2::Matrix3x3(quats).getRPY(roll, pitch, yaw);
+
                 x_goal_set_ = true;
-                RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), log_interval_, "Storing X goal");
+                xy_goal_ = true;
+                std_msgs::msg::Int32 goal_status_code;
+                goal_status_code.data = 5;
+                nav_status_pub_->publish(goal_status_code);
+
+                RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), log_interval_, "Stored X pose: (%f, %f, %f)", x_goal_.pose.position.x, x_goal_.pose.position.y, yaw);
             }
             catch (const tf2::TransformException &ex)
             {
-                RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), log_interval_, "Could not transform: %s", ex.what());
+                RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), log_interval_, "Could not transform %s to %s: %s", "base_link", "map", ex.what());
             }
         }
         else if (joy_msg.buttons[5])
@@ -236,27 +248,64 @@ private:
                 y_goal_.pose.orientation.z = t.transform.rotation.z;
                 y_goal_.pose.orientation.w = t.transform.rotation.w;
 
+                double roll, pitch, yaw;
+
+                tf2::Quaternion quats(y_goal_.pose.orientation.x, y_goal_.pose.orientation.y, y_goal_.pose.orientation.z, y_goal_.pose.orientation.w);
+                tf2::Matrix3x3(quats).getRPY(roll, pitch, yaw);
+
                 y_goal_set_ = true;
-                RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), log_interval_, "Storing Y goal");
+                xy_goal_ = true;
+                std_msgs::msg::Int32 goal_status_code;
+                goal_status_code.data = 5;
+                nav_status_pub_->publish(goal_status_code);
+
+                RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), log_interval_, "Stored Y pose: (%f, %f, %f)", y_goal_.pose.position.x, y_goal_.pose.position.y, yaw);
             }
             catch (const tf2::TransformException &ex)
             {
-                RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), log_interval_, "Could not transform: %s", ex.what());
+                RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), log_interval_, "Could not transform %s to %s: %s", "base_link", "map", ex.what());
             }
         }
+
         if (joy_msg.buttons[8])
         {
             auto request = std::make_shared<nav2_msgs::srv::ClearEntireCostmap::Request>();
+
             if (!clear_costmap_client_->service_is_ready())
             {
                 RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), log_interval_, "Clear Costmap Service not available");
             }
             else
             {
-                RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), log_interval_, "Clearing Costmap");
+                cleared_costmap_ = true;
                 auto result = clear_costmap_client_->async_send_request(request);
-                rumble_clear_costmap_ = 5; // For 0.5 seconds rumble
+                RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), log_interval_, "CostMap cleared");
+                std_msgs::msg::Int32 goal_status_code;
+                goal_status_code.data = 4;
+                nav_status_pub_->publish(goal_status_code);
             }
+        }
+
+        if (joy_msg.buttons[6])
+        {
+            pid_value_ = 0;
+            pid_status_.data = pid_value_;
+
+            RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), log_interval_, "PID status: 0");
+            pid_pub_->publish(pid_status_);
+        }
+
+        if (joy_msg.buttons[7] && !pid_button_pressed_)
+        {
+            pid_button_pressed_ = true;
+            pid_status_.data = (pid_value_ % 3) + 1;
+            pid_value_++;
+            RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), log_interval_, "PID status: %d", pid_status_.data);
+            pid_pub_->publish(pid_status_);
+        }
+        else if (joy_msg.buttons[7] == 0 && pid_button_pressed_)
+        {
+            pid_button_pressed_ = false;
         }
         if (joy_msg.buttons[9])
         {
@@ -267,36 +316,85 @@ private:
                 hill_hold_msg.data = hill_hold_control_;
                 hill_hold_pub_->publish(hill_hold_msg);
                 hill_hold_button_pressed_ = true;
+                hill_hold_control_ = true;
                 RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), log_interval_, "Hill Hold Control: %s", hill_hold_control_ ? "ON" : "OFF");
             }
         }
         else
         {
             hill_hold_button_pressed_ = false;
+        }        
+    }
+
+    void log_info()
+    {
+
+        if (static_cast<int>(goal_status_) == 0)
+        {
+            RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), log_interval_, "Current Goal: HOME");
+        }
+        else if (static_cast<int>(goal_status_) == 1)
+        {
+            RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), log_interval_, "Current Goal: X");
+        }
+        else if (static_cast<int>(goal_status_) == 2)
+        {
+            RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), log_interval_, "Current Goal: Y");
+        }
+        else if (static_cast<int>(goal_status_) == 3)
+        {
+            RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), log_interval_, "Current Goal: NONE");
         }
     }
 
     void rumble_callback()
     {
-        if (rumble_clear_costmap_ > 0)
+        if (cleared_costmap_)
         {
-            rumble_clear_costmap_--;
-            rumble_.intensity = 1.0;
-        }
-        else if (rumble_cancel_goal_ > 0)
-        {
-            rumble_cancel_goal_--;
-            rumble_.intensity = 1.0;
-        }
-        else
-        {
-            rumble_.intensity = 0.0;
+            rumble_clear_costmap_++;
+            rumble_.intensity = rumble_clear_costmap_ % 2;
+            if (rumble_clear_costmap_ > 7)
+            {
+                rumble_clear_costmap_ = 0;
+                cleared_costmap_ = false;
+            }
         }
 
-        if (rumble_.intensity != 0.0)
+        if (cancelled_goal_)
         {
-            rumble_pub_->publish(rumble_);
+            rumble_cancel_goal_++;
+            rumble_.intensity = (rumble_cancel_goal_ / 8) ^ 1;
+            if (rumble_cancel_goal_ > 7)
+            {
+                rumble_cancel_goal_ = 0;
+                cancelled_goal_ = false;
+            }
         }
+
+        if (xy_goal_)
+        {
+            rumble_xy_goal_++;
+            rumble_.intensity = ((rumble_xy_goal_ % 6) < 3) ? 1 : 0;
+
+            if (rumble_xy_goal_ > 9)
+            {
+                rumble_xy_goal_ = 0;
+                xy_goal_ = false;
+            }
+        }
+
+        if (hill_hold_control_)
+        {
+            rumble_hill_hold_++;
+            rumble_.intensity = ((rumble_hill_hold_ % 6) < 3) ? 1 : 0;
+
+            if (rumble_hill_hold_ > 9)
+            {
+                rumble_hill_hold_ = 0;
+                hill_hold_control_ = false;
+            }
+        }
+        rumble_pub_->publish(rumble_);
     }
 
     rclcpp::Subscription<sensor_msgs::msg::Joy>::SharedPtr joy_sub_;
@@ -309,11 +407,36 @@ private:
 
     rclcpp::Client<action_msgs::srv::CancelGoal>::SharedPtr cancel_goal_client_;
     rclcpp::Client<nav2_msgs::srv::ClearEntireCostmap>::SharedPtr clear_costmap_client_;
-
     rclcpp::TimerBase::SharedPtr rumble_timer_;
 
-    std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
-    std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
+    float a_scale_;
+    float l_scale_;
+    float x_vel_;
+    float y_vel_;
+    float z_vel_;
+    float increment_;
+
+    bool x_goal_set_;
+    bool y_goal_set_;
+
+    int log_interval_;
+    bool pid_button_pressed_;
+
+    bool trigger_;
+
+    bool cleared_costmap_;
+    bool cancelled_goal_;
+    bool xy_goal_;
+    bool hill_hold_control_;
+    bool hill_hold_button_pressed_;
+
+    uint8_t rumble_clear_costmap_;
+    uint8_t rumble_cancel_goal_;
+    uint8_t rumble_xy_goal_;
+    uint8_t rumble_hill_hold_;
+    uint8_t pid_value_;
+
+    GoalStatus goal_status_;
 
     geometry_msgs::msg::PoseStamped home_;
     geometry_msgs::msg::PoseStamped x_goal_;
@@ -321,39 +444,19 @@ private:
 
     sensor_msgs::msg::JoyFeedback rumble_;
 
-    double x_vel_;
-    double y_vel_;
-    double z_vel_;
-    double a_scale_;
-    double l_scale_;
-    double increment_;
+    std_msgs::msg::Int32 pid_status_;
 
-    bool x_goal_set_;
-    bool y_goal_set_;
-    bool trigger_;
-    bool cancelled_goal_;
-    bool hill_hold_control_;
-    bool hill_hold_button_pressed_;
+    std::shared_ptr<tf2_ros::TransformListener> tf_listener_{nullptr};
+    std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
+    std::clock_t start_time_1, now_time_1, start_time_2, now_time_2;
 
-    GoalStatus goal_status_;
-
-    int log_interval_;
-    int rumble_clear_costmap_;
-    int rumble_cancel_goal_;
-
-    std::clock_t start_time_1;
-    std::clock_t start_time_2;
-    std::clock_t now_time_1;
-    std::clock_t now_time_2;
-
-    const double THROTTLE_RATE = 0.2;
+    double THROTTLE_RATE = 0.0005;
 };
 
-int main(int argc, char **argv)
+int main(int argc, char *argv[])
 {
     rclcpp::init(argc, argv);
-    auto node = std::make_shared<AutoJoyTeleop>();
-    rclcpp::spin(node);
+    rclcpp::spin(std::make_shared<AutoJoyTeleop>());
     rclcpp::shutdown();
     return 0;
 }
