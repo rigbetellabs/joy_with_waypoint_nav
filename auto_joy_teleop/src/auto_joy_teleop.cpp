@@ -50,7 +50,7 @@ public:
         tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
         tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
 
-        a_scale_ = 0.5;
+        a_scale_ = 1.0;
         l_scale_ = 0.5;
 
         increment_ = 0.01;
