@@ -391,7 +391,7 @@ private:
             if (rumble_hill_hold_ > 9)
             {
                 rumble_hill_hold_ = 0;
-                hill_hold_control_ = false;
+
             }
         }
         rumble_pub_->publish(rumble_);
