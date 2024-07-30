@@ -84,6 +84,7 @@ public:
 
         hill_hold_control_ = false;
         hill_hold_button_pressed_ = false;
+        hill_hold_rumble_start_ = false;
 
         RCLCPP_INFO(this->get_logger(), "[NODE INITIATED]");
     }
@@ -316,7 +317,7 @@ private:
                 hill_hold_msg.data = hill_hold_control_;
                 hill_hold_pub_->publish(hill_hold_msg);
                 hill_hold_button_pressed_ = true;
-                hill_hold_control_ = true;
+                hill_hold_rumble_start_ = true;
                 RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), log_interval_, "Hill Hold Control: %s", hill_hold_control_ ? "ON" : "OFF");
             }
         }
@@ -383,7 +384,7 @@ private:
             }
         }
 
-        if (hill_hold_button_pressed_)
+        if (hill_hold_rumble_start_)
         {
             rumble_hill_hold_++;
             rumble_.intensity = ((rumble_hill_hold_ % 6) < 3) ? 1 : 0;
@@ -391,6 +392,7 @@ private:
             if (rumble_hill_hold_ > 9)
             {
                 rumble_hill_hold_ = 0;
+                hill_hold_rumble_start_ = false
 
             }
         }
@@ -429,6 +431,7 @@ private:
     bool xy_goal_;
     bool hill_hold_control_;
     bool hill_hold_button_pressed_;
+    bool hill_hold_rumble_start_;
 
     uint8_t rumble_clear_costmap_;
     uint8_t rumble_cancel_goal_;
