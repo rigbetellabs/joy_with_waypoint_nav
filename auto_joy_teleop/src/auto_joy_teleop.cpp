@@ -383,7 +383,7 @@ private:
             }
         }
 
-        if (hill_hold_control_)
+        if (hill_hold_button_pressed_)
         {
             rumble_hill_hold_++;
             rumble_.intensity = ((rumble_hill_hold_ % 6) < 3) ? 1 : 0;
